@@ -106,10 +106,6 @@ class Redis
       @ssl = uri.scheme == "rediss"
     end
 
-    if @ssl_context
-      @ssl = true
-    end
-
     if @ssl && !@ssl_context
       @ssl_context = default_ssl_context
     end
@@ -154,7 +150,8 @@ class Redis
 
   # :nodoc:
   private def connect
-    @connection = Connection.new(@host, @port, @unixsocket, @ssl_context, @dns_timeout, @connect_timeout, @command_timeout)
+    ssl_ctx = @ssl ? @ssl_context : nil
+    @connection = Connection.new(@host, @port, @unixsocket, ssl_ctx, @dns_timeout, @connect_timeout, @command_timeout)
     @strategy = Redis::Strategy::SingleStatement.new(@connection.not_nil!)
     strategy.command(["AUTH", @password]) if @password
     strategy.command(["SELECT", @database.to_s]) if @database
