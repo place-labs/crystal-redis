@@ -23,7 +23,12 @@ class Redis::Connection
           tcpsocket.write_timeout = command_timeout
         end
         tcpsocket.sync = false
-        OpenSSL::SSL::Socket::Client.new(tcpsocket, ssl_context)
+        # sync_close: true so closing the SSL socket also closes the underlying
+        # TCPSocket. Without it, OpenSSL's `unbuffered_close` only runs
+        # SSL_shutdown and leaves the fd open (`@bio.io.close if @sync_close`),
+        # so a `close` from another fiber never wakes a reader blocked in
+        # `receive` — wedging subscription/reconnect loops on a dead connection.
+        OpenSSL::SSL::Socket::Client.new(tcpsocket, ssl_context, sync_close: true)
       end
     else
       @socket = Redis::SocketWrapper.new do
