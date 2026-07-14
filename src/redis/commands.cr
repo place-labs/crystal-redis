@@ -1152,6 +1152,156 @@ class Redis
       string_array_command(["HVALS", namespaced(key)])
     end
 
+    # Hash field expiration (Redis 7.4+)
+    #################################################################################################
+
+    # Set a time to live (in seconds) on one or more fields of the hash stored at key.
+    #
+    # `field` may be a single field name or an `Array` of field names.
+    # `condition` is an optional one of `"NX"`, `"XX"`, `"GT"` or `"LT"`.
+    #
+    # **Return value**: Array of Integer, one entry per field:
+    # * `-2` no such field
+    # * `0` condition (NX/XX/GT/LT) was not met, TTL not set
+    # * `1` expiration was set or updated
+    # * `2` field was deleted because the TTL was in the past
+    #
+    # Example:
+    #
+    # ```
+    # redis.hexpire("myhash", 60, "field1")
+    # redis.hexpire("myhash", 60, ["field1", "field2"], condition: "NX")
+    # ```
+    def hexpire(key, seconds, field, condition = nil)
+      hfield_ttl_command("HEXPIRE", key, seconds, field, condition)
+    end
+
+    # :ditto: with the TTL specified in milliseconds.
+    def hpexpire(key, milliseconds, field, condition = nil)
+      hfield_ttl_command("HPEXPIRE", key, milliseconds, field, condition)
+    end
+
+    # Set the expiration of one or more hash fields to an absolute Unix time in seconds.
+    #
+    # See `#hexpire` for the argument and return value semantics.
+    def hexpireat(key, unix_time_seconds, field, condition = nil)
+      hfield_ttl_command("HEXPIREAT", key, unix_time_seconds, field, condition)
+    end
+
+    # :ditto: with the Unix time specified in milliseconds.
+    def hpexpireat(key, unix_time_millis, field, condition = nil)
+      hfield_ttl_command("HPEXPIREAT", key, unix_time_millis, field, condition)
+    end
+
+    private def hfield_ttl_command(command, key, ttl, field, condition)
+      fields = field.is_a?(Array) ? field : [field]
+      q = [command, namespaced(key), ttl.to_s] of RedisValue
+      q << condition.to_s.upcase if condition
+      q << "FIELDS" << fields.size.to_s
+      fields.each { |f| q << f.to_s }
+      integer_array_command(q)
+    end
+
+    # Returns the remaining time to live (in seconds) of one or more hash fields.
+    #
+    # `field` may be a single field name or an `Array` of field names.
+    #
+    # **Return value**: Array of Integer, one entry per field:
+    # * `-2` no such field
+    # * `-1` field exists but has no associated expiration
+    # * otherwise the remaining TTL in seconds
+    def httl(key, field)
+      hfield_command("HTTL", key, field)
+    end
+
+    # :ditto: with the remaining TTL returned in milliseconds.
+    def hpttl(key, field)
+      hfield_command("HPTTL", key, field)
+    end
+
+    # Returns the absolute expiration Unix time (in seconds) of one or more hash fields.
+    #
+    # See `#httl` for the argument and return value semantics.
+    def hexpiretime(key, field)
+      hfield_command("HEXPIRETIME", key, field)
+    end
+
+    # :ditto: with the expiration time returned in milliseconds.
+    def hpexpiretime(key, field)
+      hfield_command("HPEXPIRETIME", key, field)
+    end
+
+    # Removes the expiration from one or more hash fields, turning them persistent.
+    #
+    # **Return value**: Array of Integer, one entry per field:
+    # * `-2` no such field
+    # * `-1` field exists but has no associated expiration
+    # * `1` the expiration was removed
+    def hpersist(key, field)
+      hfield_command("HPERSIST", key, field)
+    end
+
+    private def hfield_command(command, key, field)
+      fields = field.is_a?(Array) ? field : [field]
+      q = [command, namespaced(key)] of RedisValue
+      q << "FIELDS" << fields.size.to_s
+      fields.each { |f| q << f.to_s }
+      integer_array_command(q)
+    end
+
+    # Set the value of a hash field and, optionally, its expiration in a single
+    # atomic operation (Redis 8.0+).
+    #
+    # **Options**:
+    # * `ex` / `px` — set the TTL in seconds / milliseconds
+    # * `exat` / `pxat` — set the expiry to an absolute Unix time in seconds / milliseconds
+    # * `keepttl` — retain the field's existing TTL instead of clearing it
+    # * `fnx` — only set the field if it does not already exist
+    # * `fxx` — only set the field if it already exists
+    #
+    # **Return value**: Integer, specifically:
+    # * `1` if the field was set
+    # * `0` if the field was not set (the `fnx`/`fxx` condition was not met)
+    #
+    # Example:
+    #
+    # ```
+    # redis.hsetex("myhash", "field1", "value1", ex: 60)
+    # ```
+    def hsetex(key, field, value, ex = nil, px = nil, exat = nil, pxat = nil, keepttl = false, fnx = false, fxx = false)
+      q = ["HSETEX", namespaced(key)] of RedisValue
+      q << "FNX" if fnx
+      q << "FXX" if fxx
+      q << "EX" << ex.to_s if ex
+      q << "PX" << px.to_s if px
+      q << "EXAT" << exat.to_s if exat
+      q << "PXAT" << pxat.to_s if pxat
+      q << "KEEPTTL" if keepttl
+      q << "FIELDS" << "1" << field.to_s << value.to_s
+      integer_command(q)
+    end
+
+    # Get the value of a hash field and, optionally, set or clear its expiration
+    # in a single atomic operation (Redis 8.0+).
+    #
+    # **Options**:
+    # * `ex` / `px` — set the TTL in seconds / milliseconds
+    # * `exat` / `pxat` — set the expiry to an absolute Unix time in seconds / milliseconds
+    # * `persist` — remove the field's existing expiration
+    #
+    # **Return value**: Array(RedisValue) containing the value of the field, or a
+    # single `nil` entry when the field does not exist.
+    def hgetex(key, field, ex = nil, px = nil, exat = nil, pxat = nil, persist = false)
+      q = ["HGETEX", namespaced(key)] of RedisValue
+      q << "EX" << ex.to_s if ex
+      q << "PX" << px.to_s if px
+      q << "EXAT" << exat.to_s if exat
+      q << "PXAT" << pxat.to_s if pxat
+      q << "PERSIST" if persist
+      q << "FIELDS" << "1" << field.to_s
+      string_array_command(q)
+    end
+
     # Adds all the specified members with the specified scores to the sorted set stored at key.
     #
     # **Options**:
