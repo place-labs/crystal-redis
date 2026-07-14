@@ -2,6 +2,11 @@ class Redis
   # Definition of all Redis commands except pipelining and transactions.
   #
   module Commands
+    # Key namespace prepended by `#namespaced`. Declared here so any type that
+    # mixes in `Commands` (e.g. `Redis::Cluster::Client`) has an inferrable
+    # `@namespace` even when it never assigns one.
+    @namespace : String = ""
+
     # Returns the given message.
     #
     # Example:
